@@ -1,20 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import * as z from "zod";
-import type { Settings } from "@/components/form-components/types";
-import type {
-	FormArray,
-	FormElement,
-	FormElementOrList,
-} from "@/db-collections/form-builder.collections";
 import useFormBuilderState from "@/hooks/use-form-builder-state";
-import useSettings from "@/hooks/use-settings";
 import {
-	extractImportDependencies,
-	generateFormCode,
-	generateImports,
-} from "@/lib/form-code-generators";
-import { generateValidationCode } from "@/lib/schema-generators";
+	generateFormJsonSchema,
+	generateFormUiSchema,
+} from "@/lib/schema-generators";
 import {
 	saveFormTemplateWithCommand,
 	setFormName,
@@ -49,79 +40,30 @@ const formSchema = z.object({
 	formName: z.string().min(1, { message: "Form name is required" }),
 });
 function CodeDialog() {
-	const { formName, formElements, isMS, schemaName, generatedCommandUrl } =
+	const { formName, formElements, isMS, generatedCommandUrl } =
 		useFormBuilderState();
-	const settings = useSettings();
-	const validationSchema = settings?.preferredSchema || "zod";
 	const [open, setOpen] = useState(false);
 	// Initialize with existing command if available
 	const [isGenerateSuccess, setIsGenerateSuccess] = useState(
 		!!generatedCommandUrl,
 	);
-	const [generatedId, setGeneratedId] = useState<string>(
-		generatedCommandUrl || "",
-	);
 	const id = useId();
-	const tabsData = [
-		{
-			value: "pnpm",
-			registery: `pnpm dlx shadcn@canary add ${generatedId}`,
-		},
-		{
-			value: "npm",
-			registery: `npx shadcn@canary add ${generatedId}`,
-		},
-		{
-			value: "yarn",
-			registery: `yarn shadcn@canary add ${generatedId}`,
-		},
-		{
-			value: "bun",
-			registery: `bunx --bun shadcn@canary add ${generatedId}`,
-		},
-	];
-	const preferredFramework = (settings?.preferredFramework || "react") as
-		| "react"
-		| "solid"
-		| "vue"
-		| "angular";
-	const generatedCode = generateFormCode({
-		formElements: formElements as FormElementOrList[],
-		isMS,
-		validationSchema,
-		settings: settings as Settings,
-		formName,
-		preferredFramework,
-	});
-	const validationCode = generateValidationCode(
-		isMS,
-		schemaName,
-		validationSchema,
-		formElements,
-	);
-	const importDependencies = generateImports(
-		formElements as (FormElement | FormArray)[],
-		validationSchema,
-		isMS,
-		schemaName,
-		preferredFramework,
-	);
+	const rjsfBundle = {
+		jsonSchema: generateFormJsonSchema(formElements, isMS),
+		uiSchema: generateFormUiSchema(formElements, isMS),
+	};
+	const jsonSchemaContent = JSON.stringify(rjsfBundle, null, 2);
 	const files = [
 		{
-			path: `components/${formName}.tsx`,
-			content: generatedCode?.[0].code,
-			type: "registry:component",
-			target: "",
-		},
-		{
-			path: `lib/${schemaName}.tsx`,
-			content: validationCode,
+			path: `schemas/${formName}.json`,
+			content: jsonSchemaContent,
 			type: "registry:lib",
 			target: "",
 		},
 	];
 	const payload = {
-		...extractImportDependencies(importDependencies, preferredFramework),
+		registryDependencies: [] as string[],
+		dependencies: [] as string[],
 		files,
 		name: formName,
 	};
@@ -158,7 +100,6 @@ function CodeDialog() {
 				const result = await mutation.mutateAsync();
 				logger("Response:", result);
 				if (result.data?.id) {
-					setGeneratedId(result.data.id);
 					setIsGenerateSuccess(true);
 					// Update command URL in active form builder state
 					setGeneratedCommandUrl(result.data.id);
@@ -216,10 +157,8 @@ function CodeDialog() {
 	useEffect(() => {
 		if (generatedCommandUrl) {
 			setIsGenerateSuccess(true);
-			setGeneratedId(generatedCommandUrl);
 		} else {
 			setIsGenerateSuccess(false);
-			setGeneratedId("");
 		}
 	}, [generatedCommandUrl]);
 
@@ -242,9 +181,9 @@ function CodeDialog() {
 			<ResponsiveDialogContent className="max-w-6xl lg:max-w-4xl max-h-[85vh] p-0">
 				<div className="flex flex-col h-full max-h-[85vh]">
 					<ResponsiveDialogHeader className="p-6 pb-4 border-b">
-						<ResponsiveDialogTitle>Generated Code</ResponsiveDialogTitle>
+						<ResponsiveDialogTitle>JSON Schema export</ResponsiveDialogTitle>
 						<ResponsiveDialogDescription>
-							Copy the code below and build awesome stuff
+							Copy the schema or save a share link to fetch it later
 						</ResponsiveDialogDescription>
 					</ResponsiveDialogHeader>
 					<form.AppForm>
@@ -293,7 +232,7 @@ function CodeDialog() {
 																form.state.isSubmitting || isGenerateSuccess
 															}
 														>
-															Generate Command
+															Save share link
 														</InputGroupButton>
 													)}
 												</InputGroupAddon>
@@ -307,11 +246,7 @@ function CodeDialog() {
 					</form.AppForm>
 					<Separator className="my-4" />
 					<ScrollArea className="flex-1 px-6 py-4">
-						<GeneratedFormCodeViewer
-							isGenerateSuccess={isGenerateSuccess}
-							generatedId={generatedId}
-							tabsData={tabsData}
-						/>
+						<GeneratedFormCodeViewer />
 					</ScrollArea>
 				</div>
 			</ResponsiveDialogContent>
